@@ -1,0 +1,9 @@
+version: "3.8"
+
+services:
+  monitoramento-site:
+    build: .
+    container_name: monitor_site
+    restart: always
+    env_file:
+      - .env
