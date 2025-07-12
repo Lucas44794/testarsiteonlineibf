@@ -5,7 +5,9 @@ import os
 
 URL_SITE = os.getenv("URL_SITE", "https://ibfescola.com.br")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-TEMPOVERIFICA = os.getenv("TEMPOVERIFICA")
+TEMPOVERIFICA = int(os.getenv("TEMPOVERIFICA", "3600"))
+
+
 
 def enviar_mensagem_discord(mensagem):
     payload = {
