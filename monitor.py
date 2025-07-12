@@ -5,6 +5,7 @@ import os
 
 URL_SITE = os.getenv("URL_SITE", "https://ibfescola.com.br")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+TEMPOVERIFICA = os.getenv("TEMPOVERIFICA")
 
 def enviar_mensagem_discord(mensagem):
     payload = {
@@ -31,4 +32,4 @@ def verificar_site():
 # Loop infinito: verifica a cada 1 hora
 while True:
     verificar_site()
-    time.sleep(3600)
+    time.sleep(TEMPOVERIFICA)
