@@ -99,36 +99,43 @@ def get_stack_id(jwt_token, stack_name):
         print(f"Ocorreu um erro de conexão: {e}")
         return None
 
-def restart_stack(jwt_token, stack_id, stack_name):
-    """Para e inicia a stack especificada, tratando o caso em que já está parada."""
+def get_stack_status(jwt_token, stack_id):
+    """Obtém o status de uma stack."""
+    stack_url = f"{PORTAINER_URL}/api/stacks/{stack_id}?endpointId={ENDPOINT_ID}"
     headers = {"Authorization": f"Bearer {jwt_token}"}
-    
-    # 1. Tentar parar a stack (pode falhar se já estiver parada)
-    stop_successful = False
-    stop_url = f"{PORTAINER_URL}/api/stacks/{stack_id}/stop?endpointId={ENDPOINT_ID}"
-    enviar_mensagem_discord(f"⚙️ Tentando PARAR a stack '{stack_name}'...")
     try:
-        response = requests.post(stop_url, headers=headers, verify=False, timeout=30)
+        response = requests.get(stack_url, headers=headers, verify=False, timeout=15)
         response.raise_for_status()
-        enviar_mensagem_discord(f"✅ Stack '{stack_name}' parada com sucesso.")
-        print("Stack parada com sucesso.")
-        stop_successful = True
-    except requests.exceptions.HTTPError as e:
-        # Se a stack já estiver parada, o Portainer retorna um erro 409 Conflict.
-        if e.response.status_code == 409:
-            enviar_mensagem_discord(f"⚠️ Stack '{stack_name}' já estava parada. Prosseguindo com o início.")
-            print("Stack já estava parada. Prosseguindo com o início.")
-            stop_successful = True # Trata como sucesso para seguir
-        else:
+        status = response.json().get('Status')
+        return status
+    except requests.exceptions.RequestException as e:
+        print(f"Erro ao obter o status da stack: {e}")
+        return None
+
+def restart_stack(jwt_token, stack_id, stack_name):
+    """Para e inicia a stack, verificando o estado atual."""
+    headers = {"Authorization": f"Bearer {jwt_token}"}
+    stack_status = get_stack_status(jwt_token, stack_id)
+
+    if stack_status == 1:  # Status 1 significa que a stack está rodando
+        # 1. Parar a stack
+        stop_url = f"{PORTAINER_URL}/api/stacks/{stack_id}/stop?endpointId={ENDPOINT_ID}"
+        enviar_mensagem_discord(f"⚙️ Tentando PARAR a stack '{stack_name}'...")
+        try:
+            response = requests.post(stop_url, headers=headers, verify=False, timeout=30)
+            response.raise_for_status()
+            enviar_mensagem_discord(f"✅ Stack '{stack_name}' parada com sucesso.")
+            print("Stack parada com sucesso.")
+        except requests.exceptions.RequestException as e:
             enviar_mensagem_discord(f"❌ Erro ao parar a stack: {e}")
             print(f"Erro ao parar a stack: {e}")
             return False
-    except requests.exceptions.RequestException as e:
-        enviar_mensagem_discord(f"❌ Ocorreu um erro de conexão ao tentar parar a stack: {e}")
-        print(f"Ocorreu um erro de conexão ao tentar parar a stack: {e}")
-        return False
-
-    if not stop_successful:
+    elif stack_status == 2:  # Status 2 significa que a stack está parada
+        enviar_mensagem_discord(f"⚠️ Stack '{stack_name}' já estava parada. Prosseguindo com o início.")
+        print("Stack já estava parada. Prosseguindo com o início.")
+    else:
+        enviar_mensagem_discord(f"❌ Não foi possível obter o status da stack '{stack_name}'.")
+        print("Não foi possível obter o status da stack.")
         return False
         
     # 2. Aguardar
@@ -167,6 +174,8 @@ def main_loop():
         try:
             resposta = requests.get(site, timeout=15)
             if resposta.status_code == 200:
+                # O site está OK, envia a mensagem e reseta o flag de reinício
+                enviar_mensagem_discord(f"✅ [{datetime.now().strftime('%d/%m %H:%M')}] O site {site} está ONLINE.")
                 print(f"✅ Site {site} está ONLINE.")
                 STACKS_RESTARTED[stack_name] = False
             else:
@@ -202,5 +211,5 @@ if __name__ == "__main__":
         main_loop()
         print(f"\n--- Próxima verificação em {TEMPOVERIFICA} segundos. ---\n")
         time.sleep(TEMPOVERIFICA)
-        # Reseta o flag para o próximo ciclo de verificação, garantindo que as stacks sejam verificadas novamente
+        # Reseta o flag para o próximo ciclo de verificação
         STACKS_RESTARTED = {name: False for name in STACK_NAMES}
