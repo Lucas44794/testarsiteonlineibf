@@ -4,10 +4,6 @@ import json
 import urllib3
 import time
 from datetime import datetime
-from dotenv import load_dotenv
-
-# Carrega as variáveis de ambiente do arquivo .env
-load_dotenv()
 
 # Desabilita o aviso sobre a verificação SSL desativada
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
