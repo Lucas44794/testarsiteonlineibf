@@ -39,7 +39,6 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 TEMPOVERIFICA = int(os.getenv("TEMPOVERIFICA", "3600"))
 
 # Variável de controle para evitar reinícios múltiplos desnecessários
-# Usa um dicionário para rastrear o estado de cada stack
 STACKS_RESTARTED = {name: False for name in STACK_NAMES}
 
 def enviar_mensagem_discord(mensagem):
@@ -77,7 +76,7 @@ def get_jwt_token():
             return None
     except requests.exceptions.HTTPError as e:
         enviar_mensagem_discord(f"❌ Erro de autenticação HTTP no Portainer: {e}")
-        print(f"Erro na autenticação! Código: {response.status_code}, Mensagem: {response.text}")
+        print(f"Erro na autenticação! Código: {e.response.status_code}, Mensagem: {e.response.text}")
         return None
     except requests.exceptions.RequestException as e:
         enviar_mensagem_discord(f"❌ Ocorreu um erro de conexão com o Portainer: {e}")
@@ -105,10 +104,11 @@ def get_stack_id(jwt_token, stack_name):
         return None
 
 def restart_stack(jwt_token, stack_id, stack_name):
-    """Para e inicia a stack especificada."""
+    """Para e inicia a stack especificada, tratando o caso em que já está parada."""
     headers = {"Authorization": f"Bearer {jwt_token}"}
     
-    # 1. Parar a stack
+    # 1. Tentar parar a stack (pode falhar se já estiver parada)
+    stop_successful = False
     stop_url = f"{PORTAINER_URL}/api/stacks/{stack_id}/stop?endpointId={ENDPOINT_ID}"
     enviar_mensagem_discord(f"⚙️ Tentando PARAR a stack '{stack_name}'...")
     try:
@@ -116,11 +116,25 @@ def restart_stack(jwt_token, stack_id, stack_name):
         response.raise_for_status()
         enviar_mensagem_discord(f"✅ Stack '{stack_name}' parada com sucesso.")
         print("Stack parada com sucesso.")
+        stop_successful = True
+    except requests.exceptions.HTTPError as e:
+        # Se a stack já estiver parada, o Portainer retorna um erro 409 Conflict.
+        if e.response.status_code == 409:
+            enviar_mensagem_discord(f"⚠️ Stack '{stack_name}' já estava parada. Prosseguindo com o início.")
+            print("Stack já estava parada. Prosseguindo com o início.")
+            stop_successful = True # Trata como sucesso para seguir
+        else:
+            enviar_mensagem_discord(f"❌ Erro ao parar a stack: {e}")
+            print(f"Erro ao parar a stack: {e}")
+            return False
     except requests.exceptions.RequestException as e:
-        enviar_mensagem_discord(f"❌ Erro ao parar a stack: {e}")
-        print(f"Erro ao parar a stack: {e}")
+        enviar_mensagem_discord(f"❌ Ocorreu um erro de conexão ao tentar parar a stack: {e}")
+        print(f"Ocorreu um erro de conexão ao tentar parar a stack: {e}")
         return False
 
+    if not stop_successful:
+        return False
+        
     # 2. Aguardar
     print("Aguardando 10 segundos para iniciar novamente...")
     time.sleep(10)
@@ -158,14 +172,12 @@ def main_loop():
             resposta = requests.get(site, timeout=15)
             if resposta.status_code == 200:
                 print(f"✅ Site {site} está ONLINE.")
-                # Reseta o flag de reinício se o site estiver online novamente
                 STACKS_RESTARTED[stack_name] = False
             else:
-                enviar_mensagem_discord(f"⚠️ O site {site} respondeu com status {resposta.status_code}.")
-                print(f"Site {site} respondeu com status {resposta.status_code}.")
+                print(f"⚠️ O site {site} respondeu com status {resposta.status_code}.")
                 # Se o site não estiver OK e a stack ainda não foi reiniciada neste ciclo
                 if not STACKS_RESTARTED.get(stack_name, False):
-                    enviar_mensagem_discord(f"⚙️ Tentando reiniciar a stack '{stack_name}' para o site '{site}'...")
+                    enviar_mensagem_discord(f"⚙️ O site {site} respondeu com status {resposta.status_code}. Tentando reiniciar a stack '{stack_name}'.")
                     
                     jwt_token = get_jwt_token()
                     if jwt_token:
@@ -173,7 +185,6 @@ def main_loop():
                         if stack_id:
                             if restart_stack(jwt_token, stack_id, stack_name):
                                 STACKS_RESTARTED[stack_name] = True
-                    # Atraso para o próximo ciclo, independente do resultado
                     time.sleep(10)
         except requests.RequestException:
             print(f"❌ O site {site} está FORA DO AR.")
